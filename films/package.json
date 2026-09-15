@@ -1,0 +1,17 @@
+{
+  "name": "films",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 integration/films_api.test.js",
+    "test:all": "node --test --test-concurrency=1 test/*.test.js integration/*.test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.7.4"
+  }
+}
