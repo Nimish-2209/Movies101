@@ -29,36 +29,53 @@ With MongoDB already available:
 npm ci
 JWT_SECRET=replace-with-a-private-random-value \
 MONGO_DB_URI=mongodb://localhost:27017/mydb \
-npm start
+npm run dev
 ```
 
+`npm run dev` watches the TypeScript source and restarts the API after edits.
+For a production-style local run, use `npm run build` followed by `npm start`.
 The direct API server listens on port `3000` unless `PORT` is provided.
 
 ## Environment variables
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `JWT_SECRET` | Yes | Private signing key for login tokens |
-| `JWT_EXPIRES_IN` | No | Token lifetime; defaults to `2h` |
-| `MONGO_DB_URI` | In Docker | MongoDB connection string |
-| `PORT` | No | HTTP port; defaults to `3000` |
+| Variable                    | Required  | Description                                           |
+| --------------------------- | --------- | ----------------------------------------------------- |
+| `JWT_SECRET`                | Yes       | Private signing key for login tokens                  |
+| `JWT_EXPIRES_IN`            | No        | Token lifetime; defaults to `2h`                      |
+| `MONGO_DB_URI`              | In Docker | MongoDB connection string                             |
+| `PORT`                      | No        | HTTP port; defaults to `3000`                         |
+| `TRUST_PROXY_HOPS`          | No        | Trusted proxy hops; Compose sets `1` for Nginx        |
+| `AUTH_RATE_LIMIT_MAX`       | No        | Combined login/signup attempts per IP; defaults to 10 |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | No        | Authentication window; defaults to 15 minutes         |
+| `SHUTDOWN_TIMEOUT_MS`       | No        | Maximum HTTP drain time; defaults to 10 seconds       |
+| `OLLAMA_BASE_URL`           | No        | Ollama API URL; defaults to local Ollama              |
+| `OLLAMA_MODEL`              | No        | Chat model; defaults to `granite4.1:3b`               |
+| `OLLAMA_API_KEY`            | Cloud     | Server-side Ollama Cloud key                          |
+| `OLLAMA_TIMEOUT_MS`         | No        | AI request timeout; defaults to 60 seconds            |
+| `AI_RATE_LIMIT_MAX`         | No        | Chat requests per client per window; defaults to 5    |
+| `AI_RATE_LIMIT_WINDOW_MS`   | No        | Chat rate-limit window; defaults to 1 minute          |
 
 Do not store the real JWT secret in source control. Generate a development
 value with `openssl rand -hex 64`.
 
+The server handles `SIGTERM` and `SIGINT` by stopping new HTTP connections,
+waiting for active requests, and then disconnecting MongoDB. If draining takes
+longer than `SHUTDOWN_TIMEOUT_MS`, it closes remaining connections and exits.
+
 ## Endpoints
 
-| Method | Path | Auth | Request body |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/films` | Public | None |
-| `POST` | `/api/v1/register` | Public | `{"username":"Alice","password":"password123"}` |
-| `POST` | `/api/v1/login` | Public | `{"username":"Alice","password":"password123"}` |
-| `GET` | `/api/v1/films/mine` | JWT | None |
-| `POST` | `/api/v1/films` | JWT | `{"tmdbId":329865}` or include `"rating":9` |
-| `PATCH` | `/api/v1/films/:id` | JWT | Any of `{"watched":true,"favorite":true,"rating":9}` |
-| `DELETE` | `/api/v1/films/:id` | JWT | None |
-| `PUT` | `/api/v1/films/ratings` | JWT | `{"updates":[{"id":"FILM_ID","rating":8}]}` |
-| `PUT` | `/api/v1/films/:id/rating` | JWT | `{"rating":8}` |
+| Method   | Path                       | Auth   | Request body                                         |
+| -------- | -------------------------- | ------ | ---------------------------------------------------- |
+| `GET`    | `/api/v1/films`            | Public | None                                                 |
+| `POST`   | `/api/v1/register`         | Public | `{"username":"Alice","password":"password123"}`      |
+| `POST`   | `/api/v1/login`            | Public | `{"username":"Alice","password":"password123"}`      |
+| `GET`    | `/api/v1/films/mine`       | JWT    | None                                                 |
+| `POST`   | `/api/v1/films`            | JWT    | `{"tmdbId":329865}` or include `"rating":9`          |
+| `PATCH`  | `/api/v1/films/:id`        | JWT    | Any of `{"watched":true,"favorite":true,"rating":9}` |
+| `DELETE` | `/api/v1/films/:id`        | JWT    | None                                                 |
+| `PUT`    | `/api/v1/films/ratings`    | JWT    | `{"updates":[{"id":"FILM_ID","rating":8}]}`          |
+| `PUT`    | `/api/v1/films/:id/rating` | JWT    | `{"rating":8}`                                       |
+| `POST`   | `/api/v1/assistant`        | JWT    | `{"messages":[{"role":"user","content":"..."}]}`     |
 
 JWT endpoints require this header:
 
@@ -66,13 +83,14 @@ JWT endpoints require this header:
 Authorization: Bearer TOKEN
 ```
 
-`GET /films` groups titles case-insensitively and returns one community record
+`GET /api/v1/films` groups titles case-insensitively and returns one community record
 per film with `rating` and `ratingCount` fields.
 
 ## Validation rules
 
 - Usernames are required and limited to 40 characters.
 - Passwords must contain 8–128 characters.
+- Login and signup share an IP limit of 10 attempts per 15 minutes by default.
 - Ratings must be whole numbers from 0 through 10.
 - New ratings require a verified TMDB movie ID; each user can rate a movie once. Existing title-only entries remain readable.
 - Only the owner recorded in the verified JWT can update a rating.
@@ -80,6 +98,8 @@ per film with `rating` and `ratingCount` fields.
 ## Tests
 
 ```bash
+npm run typecheck
+npm run lint
 npm test
 npm run test:integration
 ```
@@ -99,3 +119,19 @@ Set `TMDB_READ_ACCESS_TOKEN` in the root `.env` using your TMDB API settings, th
 - `GET /api/v1/movies/329865`: movie details.
 
 Responses include TMDB IDs, poster URLs, release dates and descriptions. Requests time out after eight seconds; successful responses are cached for five minutes (up to 200 entries per process). Existing community ratings remain separate from the TMDB catalog. The browser supports search, posters, details and pagination. The browser and Flutter clients both use these endpoints.
+
+## Reel Talk
+
+Install Ollama, then pull the local model once:
+
+```bash
+ollama pull granite4.1:3b
+```
+
+The web chat sends only a short conversation to the Films API. AI suggestions are searched in TMDB before the API returns them, so watchlist buttons always use verified catalog IDs. For Ollama Cloud, keep the key on the server and set:
+
+```text
+OLLAMA_BASE_URL=https://ollama.com
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_API_KEY=your-server-secret
+```

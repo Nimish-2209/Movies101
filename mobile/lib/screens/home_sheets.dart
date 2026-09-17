@@ -7,53 +7,29 @@ class _FilmDraft {
   final int? rating;
 }
 
-class _AddFilmSheet extends StatefulWidget {
-  const _AddFilmSheet({required this.api});
-  final FilmApi api;
+class _AddFilmSheet extends ConsumerStatefulWidget {
+  const _AddFilmSheet();
 
   @override
-  State<_AddFilmSheet> createState() => _AddFilmSheetState();
+  ConsumerState<_AddFilmSheet> createState() => _AddFilmSheetState();
 }
 
-class _AddFilmSheetState extends State<_AddFilmSheet> {
+class _AddFilmSheetState extends ConsumerState<_AddFilmSheet> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   double _rating = 7;
-  List<CatalogMovie> _matches = const [];
   CatalogMovie? _selectedMovie;
-  String? _searchError;
-  bool _searching = false;
   Timer? _searchDebounce;
 
   Future<void> _search() async {
     final query = _titleController.text.trim();
     if (query.length < 2) {
-      setState(() {
-        _matches = const [];
-        _selectedMovie = null;
-        _searchError = null;
-      });
+      setState(() => _selectedMovie = null);
+      ref.read(catalogSearchProvider.notifier).clear();
       return;
     }
-    setState(() {
-      _searching = true;
-      _searchError = null;
-      _selectedMovie = null;
-    });
-    try {
-      final movies = await widget.api.searchMovies(query);
-      if (mounted) {
-        setState(() => _matches = movies);
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _searchError = 'Could not search movies. Try again.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _searching = false);
-      }
-    }
+    setState(() => _selectedMovie = null);
+    await ref.read(catalogSearchProvider.notifier).search(query);
   }
 
   @override
@@ -65,6 +41,9 @@ class _AddFilmSheetState extends State<_AddFilmSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final search = ref.watch(catalogSearchProvider);
+    final matches = search.value ?? const <CatalogMovie>[];
+
     return Padding(
       padding: EdgeInsets.fromLTRB(
         20,
@@ -113,10 +92,8 @@ class _AddFilmSheetState extends State<_AddFilmSheet> {
                 onFieldSubmitted: (_) => _search(),
                 onChanged: (_) {
                   _searchDebounce?.cancel();
-                  setState(() {
-                    _selectedMovie = null;
-                    _matches = const [];
-                  });
+                  setState(() => _selectedMovie = null);
+                  ref.read(catalogSearchProvider.notifier).clear();
                   _searchDebounce = Timer(
                     const Duration(milliseconds: 350),
                     _search,
@@ -124,15 +101,16 @@ class _AddFilmSheetState extends State<_AddFilmSheet> {
                 },
               ),
               const SizedBox(height: 10),
-              if (_searching) const LinearProgressIndicator(),
-              if (_searchError != null) Text(_searchError!),
-              if (_matches.isNotEmpty)
+              if (search.isLoading) const LinearProgressIndicator(),
+              if (search.hasError)
+                const Text('Could not search movies. Try again.'),
+              if (matches.isNotEmpty)
                 SizedBox(
                   height: 180,
                   child: ListView.builder(
-                    itemCount: _matches.length,
+                    itemCount: matches.length,
                     itemBuilder: (context, index) {
-                      final movie = _matches[index];
+                      final movie = matches[index];
                       return ListTile(
                         leading: ClipRRect(
                           borderRadius: BorderRadius.circular(6),

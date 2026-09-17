@@ -1,70 +1,35 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../controllers/catalog_search_controller.dart';
+import '../controllers/home_controller.dart';
+import '../models/catalog_movie.dart';
 import '../models/film.dart';
-import '../services/film_api.dart';
 
 part 'home_views.dart';
 part 'home_widgets.dart';
 part 'home_sheets.dart';
 
-class MoviesHomeScreen extends StatefulWidget {
-  MoviesHomeScreen({super.key, FilmApi? api}) : api = api ?? FilmApi();
-
-  final FilmApi api;
+class MoviesHomeScreen extends ConsumerStatefulWidget {
+  const MoviesHomeScreen({super.key});
 
   @override
-  State<MoviesHomeScreen> createState() => _MoviesHomeScreenState();
+  ConsumerState<MoviesHomeScreen> createState() => _MoviesHomeScreenState();
 }
 
-class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
+class _MoviesHomeScreenState extends ConsumerState<MoviesHomeScreen> {
   final _loginFormKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-
-  String? _token;
-  String? _username;
-  bool _isLoading = false;
   bool _obscurePassword = true;
-  bool _communityLoaded = false;
-  bool _myFilmsLoaded = false;
-  int _selectedTab = 0;
-  String _searchQuery = '';
-  String _myFilmFilter = 'all';
-  List<Film> _communityFilms = const [];
-  List<Film> _myFilms = const [];
-
-  bool get _isSignedIn => _token != null;
-
-  List<Film> get _visibleMyFilms {
-    if (_myFilmFilter == 'watchlist') {
-      return _myFilms.where((film) => !film.watched).toList(growable: false);
-    }
-    if (_myFilmFilter == 'watched') {
-      return _myFilms.where((film) => film.watched).toList(growable: false);
-    }
-    if (_myFilmFilter == 'favorites') {
-      return _myFilms.where((film) => film.favorite).toList(growable: false);
-    }
-    return _myFilms;
-  }
-
-  List<Film> get _visibleCommunityFilms {
-    final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      return _communityFilms;
-    }
-    return _communityFilms
-        .where((film) => film.name.toLowerCase().contains(query))
-        .toList(growable: false);
-  }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadCommunity(announce: false);
+    Future.microtask(() {
+      ref.read(homeControllerProvider.notifier).loadCommunity(announce: false);
     });
   }
 
@@ -75,49 +40,8 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
     super.dispose();
   }
 
-  Future<T?> _request<T>(Future<T> Function() action) async {
-    setState(() => _isLoading = true);
-
-    try {
-      return await action();
-    } on ApiException catch (error) {
-      if (mounted) {
-        final sessionExpired = error.statusCode == 401 && _isSignedIn;
-        if (sessionExpired) {
-          setState(() {
-            _token = null;
-            _username = null;
-            _myFilms = const [];
-            _myFilmsLoaded = false;
-            _selectedTab = 2;
-            _passwordController.clear();
-          });
-        }
-        _showNotice(
-          sessionExpired
-              ? '${error.message} Please sign in again.'
-              : error.message,
-          isError: true,
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        _showNotice('Unable to reach Movies101 right now.', isError: true);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-
-    return null;
-  }
-
-  void _showNotice(String message, {bool isError = false}) {
-    if (!mounted) {
-      return;
-    }
-
+  void _showNotice(HomeNotice notice) {
+    if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger
       ..clearSnackBars()
@@ -126,15 +50,15 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
           content: Row(
             children: [
               Icon(
-                isError
+                notice.isError
                     ? Icons.error_outline_rounded
                     : Icons.check_circle_outline_rounded,
-                color: isError
+                color: notice.isError
                     ? const Color(0xFFFF8E9A)
                     : const Color(0xFF72E6B1),
               ),
               const SizedBox(width: 12),
-              Expanded(child: Text(message)),
+              Expanded(child: Text(notice.message)),
             ],
           ),
         ),
@@ -142,101 +66,30 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
   }
 
   Future<void> _authenticate({required bool createAccount}) async {
-    if (!(_loginFormKey.currentState?.validate() ?? false)) {
-      return;
-    }
+    if (!(_loginFormKey.currentState?.validate() ?? false)) return;
 
-    final username = _usernameController.text.trim();
-    final password = _passwordController.text;
-    final session = await _request(() async {
-      final token = createAccount
-          ? await widget.api.register(username, password)
-          : await widget.api.login(username, password);
-      final films = await widget.api.getMyFilms(token);
-      return (token: token, films: films);
-    });
-
-    if (session == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _token = session.token;
-      _username = username;
-      _myFilms = session.films;
-      _myFilmsLoaded = true;
-      _selectedTab = 1;
+    final authenticated = await ref
+        .read(homeControllerProvider.notifier)
+        .authenticate(
+          username: _usernameController.text.trim(),
+          password: _passwordController.text,
+          createAccount: createAccount,
+        );
+    if (authenticated && mounted) {
       _usernameController.clear();
       _passwordController.clear();
-    });
-    _showNotice(
-      createAccount
-          ? 'Account created. Welcome, $username.'
-          : 'Welcome back, $username.',
-    );
-  }
-
-  Future<void> _logout() async {
-    setState(() {
-      _token = null;
-      _username = null;
-      _myFilms = const [];
-      _myFilmsLoaded = false;
-      _selectedTab = 0;
-      _passwordController.clear();
-    });
-    _showNotice('You are signed out. Discovery stays open.');
-  }
-
-  Future<void> _loadCommunity({bool announce = true}) async {
-    final films = await _request(widget.api.getCommunityFilms);
-    if (films == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _communityFilms = films;
-      _communityLoaded = true;
-    });
-    if (announce) {
-      _showNotice(
-        'Refreshed ${films.length} community '
-        'film${films.length == 1 ? '' : 's'}.',
-      );
     }
   }
 
-  Future<void> _loadMyFilms({bool announce = true}) async {
-    final token = _token;
-    if (token == null) {
-      return;
-    }
-
-    final films = await _request(() => widget.api.getMyFilms(token));
-    if (films == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _myFilms = films;
-      _myFilmsLoaded = true;
-    });
-    if (announce) {
-      _showNotice('Your film shelf is up to date.');
-    }
-  }
-
-  void _selectTab(int index) {
-    setState(() => _selectedTab = index);
-    if (index == 1 && _isSignedIn && !_myFilmsLoaded) {
-      _loadMyFilms(announce: false);
-    }
+  void _logout() {
+    _passwordController.clear();
+    ref.read(homeControllerProvider.notifier).logout();
   }
 
   Future<void> _openAddFilmSheet() async {
-    if (!_isSignedIn) {
-      setState(() => _selectedTab = 2);
-      _showNotice('Sign in before adding a film.', isError: true);
+    final controller = ref.read(homeControllerProvider.notifier);
+    if (!ref.read(homeControllerProvider).isSignedIn) {
+      controller.requireSignIn();
       return;
     }
 
@@ -244,104 +97,23 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => _AddFilmSheet(api: widget.api),
+      builder: (_) => const _AddFilmSheet(),
     );
-    if (draft == null || !mounted) {
-      return;
-    }
+    if (draft == null || !mounted) return;
 
-    final token = _token;
-    if (token == null) {
-      return;
-    }
-
-    final result = await _request(() async {
-      final added = await widget.api.addFilm(
-        token: token,
-        tmdbId: draft.tmdbId,
-        rating: draft.rating,
-      );
-      final films = await widget.api.getMyFilms(token);
-      return (added: added, films: films);
-    });
-    if (result == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _myFilms = result.films;
-      _myFilmsLoaded = true;
-      _selectedTab = 1;
-    });
-    _showNotice(
-      draft.rating == null
-          ? '“${result.added.name}” joined your watchlist. Future-you has plans.'
-          : 'Rated “${result.added.name}” ${draft.rating}/10. Bold take!',
-    );
+    await controller.addFilm(tmdbId: draft.tmdbId, rating: draft.rating);
   }
 
   Future<void> _editRating(Film film) async {
-    final token = _token;
-    if (token == null) {
-      return;
-    }
-
     final rating = await showModalBottomSheet<int>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => _RatingSheet(film: film),
     );
-    if (rating == null || !mounted) {
-      return;
-    }
+    if (rating == null || !mounted) return;
 
-    final updatedFilm = await _request(
-      () => widget.api.updateRating(
-        token: token,
-        filmId: film.id,
-        rating: rating,
-      ),
-    );
-    if (updatedFilm == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _myFilms = _myFilms
-          .map((item) => item.id == updatedFilm.id ? updatedFilm : item)
-          .toList(growable: false);
-    });
-    _showNotice(
-      'Updated “${updatedFilm.name}” to '
-      '${updatedFilm.rating!.toStringAsFixed(0)}/10.',
-    );
-  }
-
-  Future<void> _patchFilm(Film film, {bool? watched, bool? favorite}) async {
-    final token = _token;
-    if (token == null) return;
-    final updated = await _request(
-      () => widget.api.updateFilm(
-        token: token,
-        filmId: film.id,
-        watched: watched,
-        favorite: favorite,
-      ),
-    );
-    if (updated == null || !mounted) return;
-    setState(() {
-      _myFilms = _myFilms
-          .map((item) => item.id == updated.id ? updated : item)
-          .toList(growable: false);
-    });
-    _showNotice(
-      favorite != null
-          ? (favorite
-                ? 'A star is born. Added to favorites!'
-                : 'Removed from favorites.')
-          : 'Marked watched. Popcorn evidence accepted.',
-    );
+    await ref.read(homeControllerProvider.notifier).updateRating(film, rating);
   }
 
   Future<void> _deleteFilm(Film film) async {
@@ -362,28 +134,14 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
         ],
       ),
     );
-    final token = _token;
-    if (confirmed != true || token == null) return;
-    final removed = await _request(
-      () => widget.api.deleteFilm(token: token, filmId: film.id),
-    );
-    if (!mounted || removed != true) return;
-    setState(
-      () => _myFilms = _myFilms
-          .where((item) => item.id != film.id)
-          .toList(growable: false),
-    );
-    _showNotice('“${film.name}” left the building.');
+    if (confirmed != true || !mounted) return;
+    await ref.read(homeControllerProvider.notifier).deleteFilm(film);
   }
 
   static String? _validateUsername(String? value) {
     final username = value?.trim() ?? '';
-    if (username.isEmpty) {
-      return 'Enter a username.';
-    }
-    if (username.length > 40) {
-      return 'Use 40 characters or fewer.';
-    }
+    if (username.isEmpty) return 'Enter a username.';
+    if (username.length > 40) return 'Use 40 characters or fewer.';
     return null;
   }
 
@@ -397,7 +155,16 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(homeControllerProvider);
+    final controller = ref.read(homeControllerProvider.notifier);
     final titles = ['Discover', 'My films', 'Account'];
+
+    ref.listen(homeControllerProvider.select((value) => value.notice), (
+      previous,
+      next,
+    ) {
+      if (next != null && next.id != previous?.id) _showNotice(next);
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -418,7 +185,7 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  titles[_selectedTab],
+                  titles[state.selectedTab],
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
                 const Text(
@@ -435,18 +202,18 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
           ],
         ),
         actions: [
-          if (_isSignedIn && _selectedTab != 2)
+          if (state.isSignedIn && state.selectedTab != 2)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: IconButton(
                 tooltip: 'Open account',
-                onPressed: () => _selectTab(2),
+                onPressed: () => controller.selectTab(2),
                 icon: CircleAvatar(
                   radius: 16,
                   backgroundColor: const Color(0xFFE50914),
                   child: Text(
-                    (_username?.isNotEmpty ?? false)
-                        ? _username![0].toUpperCase()
+                    (state.username?.isNotEmpty ?? false)
+                        ? state.username![0].toUpperCase()
                         : 'M',
                     style: const TextStyle(
                       color: Colors.white,
@@ -457,7 +224,7 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
               ),
             ),
         ],
-        bottom: _isLoading
+        bottom: state.isLoading
             ? const PreferredSize(
                 preferredSize: Size.fromHeight(3),
                 child: LinearProgressIndicator(minHeight: 3),
@@ -465,39 +232,40 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
             : null,
       ),
       body: IndexedStack(
-        index: _selectedTab,
+        index: state.selectedTab,
         children: [
           _DiscoverView(
-            films: _visibleCommunityFilms,
-            totalFilmCount: _communityFilms.length,
-            isLoaded: _communityLoaded,
-            searchQuery: _searchQuery,
-            onSearchChanged: (value) => setState(() => _searchQuery = value),
-            onRefresh: () => _loadCommunity(announce: false),
+            films: state.visibleCommunityFilms,
+            totalFilmCount: state.communityFilms.length,
+            isLoaded: state.communityLoaded,
+            searchQuery: state.searchQuery,
+            onSearchChanged: controller.setSearchQuery,
+            onRefresh: () => controller.loadCommunity(announce: false),
           ),
           _MyFilmsView(
-            username: _username,
-            films: _visibleMyFilms,
-            totalFilmCount: _myFilms.length,
-            filter: _myFilmFilter,
-            isSignedIn: _isSignedIn,
-            isLoaded: _myFilmsLoaded,
-            onRefresh: () => _loadMyFilms(announce: false),
-            onOpenAccount: () => _selectTab(2),
+            username: state.username,
+            films: state.visibleMyFilms,
+            totalFilmCount: state.myFilms.length,
+            filter: state.myFilmFilter,
+            isSignedIn: state.isSignedIn,
+            isLoaded: state.myFilmsLoaded,
+            onRefresh: () => controller.loadMyFilms(announce: false),
+            onOpenAccount: () => controller.selectTab(2),
             onAddFilm: _openAddFilmSheet,
             onEditFilm: _editRating,
-            onFilterChanged: (filter) => setState(() => _myFilmFilter = filter),
-            onFavorite: (film) => _patchFilm(film, favorite: !film.favorite),
-            onWatched: (film) => _patchFilm(film, watched: true),
+            onFilterChanged: controller.setMyFilmFilter,
+            onFavorite: (film) =>
+                controller.patchFilm(film, favorite: !film.favorite),
+            onWatched: (film) => controller.patchFilm(film, watched: true),
             onDelete: _deleteFilm,
           ),
           _AccountView(
             formKey: _loginFormKey,
             usernameController: _usernameController,
             passwordController: _passwordController,
-            username: _username,
-            isSignedIn: _isSignedIn,
-            isLoading: _isLoading,
+            username: state.username,
+            isSignedIn: state.isSignedIn,
+            isLoading: state.isLoading,
             obscurePassword: _obscurePassword,
             onTogglePassword: () {
               setState(() => _obscurePassword = !_obscurePassword);
@@ -510,17 +278,17 @@ class _MoviesHomeScreenState extends State<MoviesHomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: _selectedTab == 1 && _isSignedIn
+      floatingActionButton: state.selectedTab == 1 && state.isSignedIn
           ? FloatingActionButton.extended(
               key: const Key('addFilmFab'),
-              onPressed: _isLoading ? null : _openAddFilmSheet,
+              onPressed: state.isLoading ? null : _openAddFilmSheet,
               icon: const Icon(Icons.add_rounded),
               label: const Text('Add a film'),
             )
           : null,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedTab,
-        onDestinationSelected: _selectTab,
+        selectedIndex: state.selectedTab,
+        onDestinationSelected: controller.selectTab,
         destinations: const [
           NavigationDestination(
             key: Key('discoverTab'),

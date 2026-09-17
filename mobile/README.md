@@ -4,6 +4,10 @@ This Flutter application is the native client for the Movies101 Films API. It
 uses the same red-and-dark color family as the website but has a separate
 mobile-first interface rather than reproducing the web page.
 
+Riverpod keeps API state and filtering outside the widgets. `FilmApi` only
+handles HTTP and JSON; the home and catalog-search controllers own session,
+loading, mutation, and search state; screens focus on rendering and input.
+
 ## Native experience
 
 - **Discover:** browse, search, and pull to refresh community films
@@ -99,11 +103,15 @@ on a compatible local Xcode installation and signing configuration.
 | File | Purpose |
 | --- | --- |
 | `lib/main.dart` | Application theme and startup |
-| `lib/screens/home_screen.dart` | Navigation state and workflow coordination |
+| `lib/controllers/home_controller.dart` | Session, films, filtering, and mutations |
+| `lib/controllers/catalog_search_controller.dart` | Catalog-search state and stale-request protection |
+| `lib/providers/film_api_provider.dart` | Injectable `FilmApi` lifecycle |
+| `lib/screens/home_screen.dart` | Navigation and UI event wiring |
 | `lib/screens/home_views.dart` | Discover, shelf, and account screens |
 | `lib/screens/home_widgets.dart` | Shared film cards and empty/loading states |
 | `lib/screens/home_sheets.dart` | Add-film and rating sheets |
-| `lib/services/film_api.dart` | REST requests and JWT headers |
+| `lib/services/film_api.dart` | HTTP, JSON decoding, and JWT headers |
+| `lib/models/catalog_movie.dart` | Typed catalog-search result model |
 | `lib/models/film.dart` | Typed film response model |
 | `assets/movies101_clapperboard.png` | In-app brand asset |
 | `test/` | API, model, authentication-visibility, and widget tests |

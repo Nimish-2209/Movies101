@@ -1,7 +1,11 @@
 const API = (() => {
-  const apiBaseUrl = (window.MOVIES101_API_BASE_URL || '/api/v1').replace(/\/$/, '');
+  const apiBaseUrl = (window.MOVIES101_API_BASE_URL || '/api/v1').replace(
+    /\/$/,
+    ''
+  );
   const filmsUrl = apiBaseUrl + '/films';
   const moviesUrl = apiBaseUrl + '/movies';
+  const assistantUrl = apiBaseUrl + '/assistant';
   const filmRatingsUrl = filmsUrl + '/ratings';
   const loginUrl = apiBaseUrl + '/login';
   const registerUrl = apiBaseUrl + '/register';
@@ -18,6 +22,12 @@ const API = (() => {
   let memberSearchTimer = null;
   let memberSearchController = null;
   let memberSearchVersion = 0;
+  let assistantHistory = [];
+  let assistantTranscript = [];
+  let assistantIsLoading = false;
+
+  const assistantGreeting =
+    'Welcome to Reel Talk. Ask for a movie mood, a weird double feature, or what to watch next.';
 
   const getElement = (id) => {
     return document.getElementById(id);
@@ -125,6 +135,7 @@ const API = (() => {
     clearSavedSession();
     selectedMovie = null;
     getElement('filmTitle').value = '';
+    resetAssistant();
 
     clearTable();
     setTableVisible(false);
@@ -132,7 +143,11 @@ const API = (() => {
 
   const isValidRating = (rating) => {
     const numericRating = Number(rating);
-    return Number.isInteger(numericRating) && numericRating >= 0 && numericRating <= 10;
+    return (
+      Number.isInteger(numericRating) &&
+      numericRating >= 0 &&
+      numericRating <= 10
+    );
   };
 
   const handleAuthenticationError = (response, data) => {
@@ -207,7 +222,8 @@ const API = (() => {
       newRatingInput.min = '0';
       newRatingInput.max = '10';
       newRatingInput.step = '1';
-      newRatingInput.placeholder = film.rating == null ? 'Give it a score' : 'Leave blank to keep';
+      newRatingInput.placeholder =
+        film.rating == null ? 'Give it a score' : 'Leave blank to keep';
       newRatingInput.id = 'newRating-' + film._id;
       newRatingInput.className = 'form-control table-rating-input';
       newRatingInput.dataset.filmId = film._id;
@@ -222,10 +238,13 @@ const API = (() => {
     const titleCell = createTitleCell(film);
     const ratingCell = document.createElement('td');
     const isCommunityFilm = currentView === 'community';
-    ratingCell.dataset.label = isCommunityFilm ? 'Average rating' : 'Your rating';
-    ratingCell.textContent = film.rating == null
-      ? 'Not rated'
-      : Number(film.rating).toFixed(isCommunityFilm ? 1 : 0) + ' / 10';
+    ratingCell.dataset.label = isCommunityFilm
+      ? 'Average rating'
+      : 'Your rating';
+    ratingCell.textContent =
+      film.rating == null
+        ? 'Not rated'
+        : Number(film.rating).toFixed(isCommunityFilm ? 1 : 0) + ' / 10';
     ratingCell.className = 'rating-cell';
     row.appendChild(titleCell);
 
@@ -233,7 +252,9 @@ const API = (() => {
       const statusCell = document.createElement('td');
       statusCell.dataset.label = 'Status';
       statusCell.textContent = film.watched ? 'Watched 🍿' : 'Watchlist 🎬';
-      statusCell.className = film.watched ? 'status-watched' : 'status-watchlist';
+      statusCell.className = film.watched
+        ? 'status-watched'
+        : 'status-watchlist';
       row.appendChild(statusCell);
     }
 
@@ -243,30 +264,47 @@ const API = (() => {
       const countCell = document.createElement('td');
       const ratingCount = Number(film.ratingCount) || 0;
       countCell.dataset.label = 'User ratings';
-      countCell.textContent = ratingCount + ' critic' + (ratingCount === 1 ? '' : 's') + ' in the cheap seats';
+      countCell.textContent =
+        ratingCount +
+        ' critic' +
+        (ratingCount === 1 ? '' : 's') +
+        ' in the cheap seats';
       countCell.className = 'rating-count-cell';
       row.appendChild(countCell);
     } else {
       const actionsCell = document.createElement('td');
       actionsCell.dataset.label = 'Actions';
       actionsCell.className = 'shelf-actions';
-      actionsCell.appendChild(createActionButton(
-        film.favorite ? '★ Favorite' : '☆ Favorite',
-        film.favorite ? 'shelf-action is-favorite' : 'shelf-action',
-        () => patchFilm(film._id, {favorite: !film.favorite}, film.favorite ? 'Removed from favorites.' : 'A star is born. Added to favorites!')
-      ));
+      actionsCell.appendChild(
+        createActionButton(
+          film.favorite ? '★ Favorite' : '☆ Favorite',
+          film.favorite ? 'shelf-action is-favorite' : 'shelf-action',
+          () =>
+            patchFilm(
+              film._id,
+              { favorite: !film.favorite },
+              film.favorite
+                ? 'Removed from favorites.'
+                : 'A star is born. Added to favorites!'
+            )
+        )
+      );
       if (!film.watched) {
-        actionsCell.appendChild(createActionButton(
-          '✓ Watched it',
-          'shelf-action',
-          () => patchFilm(film._id, {watched: true}, 'Marked watched. Popcorn evidence accepted.')
-        ));
+        actionsCell.appendChild(
+          createActionButton('✓ Watched it', 'shelf-action', () =>
+            patchFilm(
+              film._id,
+              { watched: true },
+              'Marked watched. Popcorn evidence accepted.'
+            )
+          )
+        );
       }
-      actionsCell.appendChild(createActionButton(
-        'Remove',
-        'shelf-action shelf-remove',
-        () => deleteFilm(film)
-      ));
+      actionsCell.appendChild(
+        createActionButton('Remove', 'shelf-action shelf-remove', () =>
+          deleteFilm(film)
+        )
+      );
       row.appendChild(actionsCell);
     }
     return row;
@@ -283,48 +321,56 @@ const API = (() => {
     empty.hidden = true;
 
     if (isUpdateMode) {
-      header.innerHTML = '<th>Movie</th><th>Current Rating</th><th>New Rating</th>';
+      header.innerHTML =
+        '<th>Movie</th><th>Current Rating</th><th>New Rating</th>';
       saveButton.hidden = false;
       filters.hidden = true;
     } else if (currentView === 'mine') {
-      header.innerHTML = '<th>Movie</th><th>Status</th><th>Rating</th><th>Actions</th>';
+      header.innerHTML =
+        '<th>Movie</th><th>Status</th><th>Rating</th><th>Actions</th>';
       saveButton.hidden = true;
       filters.hidden = false;
     } else {
-      header.innerHTML = '<th>Movie</th><th>Average Rating</th><th>User Ratings</th>';
+      header.innerHTML =
+        '<th>Movie</th><th>Average Rating</th><th>User Ratings</th>';
       saveButton.hidden = true;
       filters.hidden = true;
     }
 
-    getElement('filmListTitle').textContent = currentView === 'mine'
-      ? 'My cinematic universe'
-      : 'Community films';
+    getElement('filmListTitle').textContent =
+      currentView === 'mine' ? 'My cinematic universe' : 'Community films';
 
-    const visibleFilms = currentView === 'mine' && !isUpdateMode
-      ? currentFilms.filter(filmMatchesFilter)
-      : currentFilms;
+    const visibleFilms =
+      currentView === 'mine' && !isUpdateMode
+        ? currentFilms.filter(filmMatchesFilter)
+        : currentFilms;
     visibleFilms.forEach((film) => body.appendChild(createFilmRow(film)));
 
     if (currentView === 'mine' && !isUpdateMode && visibleFilms.length === 0) {
-      empty.textContent = myFilmFilter === 'favorites'
-        ? 'No favorites yet. Your stars are still waiting for their close-up.'
-        : myFilmFilter === 'watchlist'
-          ? 'Watchlist cleared. Either impressive or suspicious.'
-          : myFilmFilter === 'watched'
-            ? 'No watched movies yet. Roll something good.'
-            : 'Your shelf is awaiting its opening scene.';
+      empty.textContent =
+        myFilmFilter === 'favorites'
+          ? 'No favorites yet. Your stars are still waiting for their close-up.'
+          : myFilmFilter === 'watchlist'
+            ? 'Watchlist cleared. Either impressive or suspicious.'
+            : myFilmFilter === 'watched'
+              ? 'No watched movies yet. Roll something good.'
+              : 'Your shelf is awaiting its opening scene.';
       empty.hidden = false;
     }
 
     if (filters && typeof filters.querySelectorAll === 'function') {
       filters.querySelectorAll('.film-filter').forEach((button) => {
-        button.classList.toggle('active', button.dataset.filter === myFilmFilter);
+        button.classList.toggle(
+          'active',
+          button.dataset.filter === myFilmFilter
+        );
       });
     }
   };
 
   const setMyFilmFilter = (filter) => {
-    if (!['all', 'watchlist', 'watched', 'favorites'].includes(filter)) return false;
+    if (!['all', 'watchlist', 'watched', 'favorites'].includes(filter))
+      return false;
     myFilmFilter = filter;
     if (currentView === 'mine') renderFilmsTable();
     return false;
@@ -347,26 +393,29 @@ const API = (() => {
     }
 
     try {
-      const { response, data } = await fetchJson(action === 'register' ? registerUrl : loginUrl, {
-        method: 'POST',
-        body: JSON.stringify({ username: username, password: password }),
-        headers: requestHeaders({ json: true })
-      });
+      const { response, data } = await fetchJson(
+        action === 'register' ? registerUrl : loginUrl,
+        {
+          method: 'POST',
+          body: JSON.stringify({ username: username, password: password }),
+          headers: requestHeaders({ json: true })
+        }
+      );
 
       if (!response.ok || !data.token) {
         setStatus(
-          data.error || (action === 'register'
-            ? 'Unable to sign up right now.'
-            : 'Unable to log in right now.'),
+          data.error ||
+            (action === 'register'
+              ? 'Unable to sign up right now.'
+              : 'Unable to log in right now.'),
           'error'
         );
         return false;
       }
 
       jwtToken = data.token;
-      const authenticatedUsername = data.user && data.user.username
-        ? data.user.username
-        : username;
+      const authenticatedUsername =
+        data.user && data.user.username ? data.user.username : username;
       setAuthenticatedState(authenticatedUsername);
       usernameInput.value = '';
       passwordInput.value = '';
@@ -488,8 +537,8 @@ const API = (() => {
 
     try {
       const { response, data } = await fetchJson(
-        moviesUrl + '?' + new URLSearchParams({q: normalizedQuery, page: 1}),
-        {signal: memberSearchController.signal}
+        moviesUrl + '?' + new URLSearchParams({ q: normalizedQuery, page: 1 }),
+        { signal: memberSearchController.signal }
       );
       if (!response.ok) {
         throw new Error(data.error || 'Unable to search movies.');
@@ -500,7 +549,10 @@ const API = (() => {
       renderMemberMovieResults(Array.isArray(data.results) ? data.results : []);
       return true;
     } catch (error) {
-      if (error.name === 'AbortError' || requestVersion !== memberSearchVersion) {
+      if (
+        error.name === 'AbortError' ||
+        requestVersion !== memberSearchVersion
+      ) {
         return false;
       }
       results.innerHTML = '';
@@ -514,15 +566,24 @@ const API = (() => {
   };
 
   const selectCatalogMovie = (movie) => {
-    selectedMovie = {id: movie.id, title: movie.title, releaseDate: movie.releaseDate || ''};
-    getElement('filmTitle').value = movie.title + (movie.releaseDate ? ' (' + movie.releaseDate.slice(0, 4) + ')' : '');
+    selectedMovie = {
+      id: movie.id,
+      title: movie.title,
+      releaseDate: movie.releaseDate || ''
+    };
+    getElement('filmTitle').value =
+      movie.title +
+      (movie.releaseDate ? ' (' + movie.releaseDate.slice(0, 4) + ')' : '');
     clearMemberMovieResults();
     if (jwtToken) {
-      getElement('memberActions').scrollIntoView?.({behavior: 'smooth'});
+      getElement('memberActions').scrollIntoView?.({ behavior: 'smooth' });
       getElement('filmRating').focus();
-      setStatus('Selected ' + movie.title + '. Add your rating below.', 'notice');
+      setStatus(
+        'Selected ' + movie.title + '. Add your rating below.',
+        'notice'
+      );
     } else {
-      getElement('loginForm').scrollIntoView?.({behavior: 'smooth'});
+      getElement('loginForm').scrollIntoView?.({ behavior: 'smooth' });
       setStatus('Selected ' + movie.title + '. Sign in to rate it.', 'notice');
     }
   };
@@ -530,15 +591,18 @@ const API = (() => {
   const postSelectedMovie = async (rating) => {
     if (jwtToken === '') {
       setStatus('Sign in first—the velvet rope is up.', 'error');
-      getElement('loginForm').scrollIntoView?.({behavior: 'smooth'});
+      getElement('loginForm').scrollIntoView?.({ behavior: 'smooth' });
       return false;
     }
     if (!selectedMovie || !Number.isSafeInteger(selectedMovie.id)) {
-      setStatus('Pick a real movie first. Imaginary sequels do not count.', 'error');
+      setStatus(
+        'Pick a real movie first. Imaginary sequels do not count.',
+        'error'
+      );
       return false;
     }
     const title = selectedMovie.title;
-    const payload = {tmdbId: selectedMovie.id};
+    const payload = { tmdbId: selectedMovie.id };
     if (rating !== undefined) payload.rating = rating;
     try {
       const { response, data } = await fetchJson(filmsUrl, {
@@ -577,6 +641,161 @@ const API = (() => {
     return saveSelectedToWatchlist();
   };
 
+  const createAssistantMovieCard = (recommendation) => {
+    const card = document.createElement('article');
+    card.className = 'assistant-movie-card';
+
+    if (recommendation.posterUrl) {
+      const poster = document.createElement('img');
+      poster.src = recommendation.posterUrl;
+      poster.alt = '';
+      poster.loading = 'lazy';
+      card.appendChild(poster);
+    }
+
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    const year = recommendation.releaseDate
+      ? ' (' + recommendation.releaseDate.slice(0, 4) + ')'
+      : '';
+    title.textContent = recommendation.title + year;
+    const reason = document.createElement('p');
+    reason.textContent = recommendation.reason;
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'assistant-add-button';
+    addButton.textContent = '+ Watchlist';
+    addButton.addEventListener('click', () => saveCatalogMovie(recommendation));
+    copy.appendChild(title);
+    copy.appendChild(reason);
+    copy.appendChild(addButton);
+    card.appendChild(copy);
+    return card;
+  };
+
+  const renderAssistantConversation = () => {
+    const messages = getElement('assistantMessages');
+    if (!messages) return;
+    messages.innerHTML = '';
+
+    assistantTranscript.forEach((message) => {
+      const row = document.createElement('div');
+      row.className = 'assistant-message assistant-message-' + message.role;
+      const bubble = document.createElement('p');
+      bubble.textContent = message.content;
+      row.appendChild(bubble);
+      (message.recommendations || []).forEach((recommendation) => {
+        row.appendChild(createAssistantMovieCard(recommendation));
+      });
+      messages.appendChild(row);
+    });
+
+    if (assistantIsLoading) {
+      const typing = document.createElement('p');
+      typing.className = 'assistant-typing';
+      typing.textContent = 'Rewinding the brain tape…';
+      messages.appendChild(typing);
+    }
+    messages.scrollTop = messages.scrollHeight;
+  };
+
+  const resetAssistant = () => {
+    assistantHistory = [];
+    assistantTranscript = [
+      { role: 'assistant', content: assistantGreeting, recommendations: [] }
+    ];
+    assistantIsLoading = false;
+    const input = getElement('assistantInput');
+    const sendButton = getElement('assistantSend');
+    if (input) input.value = '';
+    if (sendButton) sendButton.disabled = false;
+    renderAssistantConversation();
+  };
+
+  const toggleAssistant = (show) => {
+    const panel = getElement('movieAssistant');
+    const launcher = getElement('assistantLauncher');
+    if (!panel || !launcher) return false;
+    panel.hidden = !show;
+    launcher.hidden = show;
+    launcher.setAttribute('aria-expanded', String(show));
+    if (show) getElement('assistantInput')?.focus();
+    return false;
+  };
+
+  const appendAssistantMessage = (role, content, recommendations = []) => {
+    assistantTranscript.push({ role, content, recommendations });
+    renderAssistantConversation();
+  };
+
+  const sendAssistantMessage = async () => {
+    if (assistantIsLoading) return false;
+    const input = getElement('assistantInput');
+    const content = input.value.trim();
+    if (content === '') return false;
+
+    if (jwtToken === '') {
+      appendAssistantMessage(
+        'assistant',
+        'Tickets, please. Sign in so I can remember your shelf and dodge repeats.'
+      );
+      setStatus('Sign in to chat with Reel Talk.', 'notice');
+      getElement('loginForm').scrollIntoView?.({ behavior: 'smooth' });
+      return false;
+    }
+
+    input.value = '';
+    assistantHistory.push({ role: 'user', content });
+    assistantHistory = assistantHistory.slice(-10);
+    appendAssistantMessage('user', content);
+    assistantIsLoading = true;
+    input.disabled = true;
+    getElement('assistantSend').disabled = true;
+    renderAssistantConversation();
+
+    try {
+      const { response, data } = await fetchJson(assistantUrl, {
+        method: 'POST',
+        body: JSON.stringify({ messages: assistantHistory }),
+        headers: requestHeaders({ json: true, authenticated: true })
+      });
+      if (!response.ok) {
+        if (handleAuthenticationError(response, data)) return false;
+        appendAssistantMessage(
+          'assistant',
+          data.error || 'The projector flickered. Try that again.'
+        );
+        return false;
+      }
+
+      const reply =
+        typeof data.reply === 'string'
+          ? data.reply
+          : 'I lost that reel. Try another question.';
+      assistantHistory.push({ role: 'assistant', content: reply });
+      assistantHistory = assistantHistory.slice(-10);
+      appendAssistantMessage(
+        'assistant',
+        reply,
+        Array.isArray(data.recommendations) ? data.recommendations : []
+      );
+      return true;
+    } catch (error) {
+      console.log(error);
+      appendAssistantMessage(
+        'assistant',
+        'The booth went quiet. Check Ollama and try again.'
+      );
+      return false;
+    } finally {
+      assistantIsLoading = false;
+      input.disabled = false;
+      getElement('assistantSend').disabled = false;
+      renderAssistantConversation();
+      input.focus();
+    }
+  };
+
   const createFilm = async () => {
     const ratingValue = getElement('filmRating').value.trim();
     if (ratingValue === '') {
@@ -603,7 +822,9 @@ const API = (() => {
         setStatus(data.error || 'Could not update that movie.', 'error');
         return false;
       }
-      currentFilms = currentFilms.map((film) => film._id === data._id ? data : film);
+      currentFilms = currentFilms.map((film) =>
+        film._id === data._id ? data : film
+      );
       renderFilmsTable();
       setStatus(successMessage, 'success');
       return true;
@@ -614,7 +835,10 @@ const API = (() => {
   };
 
   const deleteFilm = async (film) => {
-    if (typeof window.confirm === 'function' && !window.confirm('Remove “' + film.name + '” from your shelf?')) {
+    if (
+      typeof window.confirm === 'function' &&
+      !window.confirm('Remove “' + film.name + '” from your shelf?')
+    ) {
       return false;
     }
     try {
@@ -735,8 +959,10 @@ const API = (() => {
 
       if (refreshed) {
         setStatus(
-          'Updated ' + updates.length + ' film rating' +
-          (updates.length === 1 ? '.' : 's.'),
+          'Updated ' +
+            updates.length +
+            ' film rating' +
+            (updates.length === 1 ? '.' : 's.'),
           'success'
         );
       }
@@ -794,8 +1020,11 @@ const API = (() => {
       if (showStatus) {
         const label = view === 'mine' ? 'your film' : 'community film';
         setStatus(
-          'Showing ' + currentFilms.length + ' ' + label +
-          (currentFilms.length === 1 ? '.' : 's.'),
+          'Showing ' +
+            currentFilms.length +
+            ' ' +
+            label +
+            (currentFilms.length === 1 ? '.' : 's.'),
           'success'
         );
       }
@@ -884,6 +1113,7 @@ const API = (() => {
   };
 
   initializeMemberMovieSearch();
+  resetAssistant();
 
   return {
     restoreSession: restoreSession,
@@ -893,6 +1123,8 @@ const API = (() => {
     createFilm: createFilm,
     saveSelectedToWatchlist: saveSelectedToWatchlist,
     saveCatalogMovie: saveCatalogMovie,
+    toggleAssistant: toggleAssistant,
+    sendAssistantMessage: sendAssistantMessage,
     setMyFilmFilter: setMyFilmFilter,
     selectCatalogMovie: selectCatalogMovie,
     searchMemberMovies: searchMemberMovies,

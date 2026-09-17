@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/catalog_movie.dart';
 import '../models/film.dart';
 
 class ApiException implements Exception {
@@ -14,25 +15,6 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-class CatalogMovie {
-  const CatalogMovie({
-    required this.id,
-    required this.title,
-    required this.releaseDate,
-    this.posterUrl,
-  });
-  final int id;
-  final String title;
-  final String releaseDate;
-  final String? posterUrl;
-  factory CatalogMovie.fromJson(Map<String, dynamic> json) => CatalogMovie(
-    id: json['id'] as int,
-    title: json['title'] as String,
-    releaseDate: json['releaseDate']?.toString() ?? '',
-    posterUrl: json['posterUrl']?.toString(),
-  );
-}
-
 class FilmApi {
   FilmApi({http.Client? client, String? baseUrl})
     : _client = client ?? http.Client(),
@@ -40,6 +22,8 @@ class FilmApi {
 
   final http.Client _client;
   final String baseUrl;
+
+  void close() => _client.close();
 
   static String _defaultBaseUrl() {
     const configuredUrl = String.fromEnvironment('API_BASE_URL');

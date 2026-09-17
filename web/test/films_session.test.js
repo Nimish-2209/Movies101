@@ -80,11 +80,14 @@ function createClient(storage, fetchImplementation) {
     'myFilmFilters',
     'filmFilterEmpty',
     'saveUpdateButton',
-    'statusMessage'
+    'statusMessage',
+    'assistantLauncher',
+    'movieAssistant',
+    'assistantMessages',
+    'assistantInput',
+    'assistantSend'
   ];
-  const elements = new Map(
-    elementIds.map((id) => [id, new FakeElement()])
-  );
+  const elements = new Map(elementIds.map((id) => [id, new FakeElement()]));
   const window = { sessionStorage: storage };
   const context = vm.createContext({
     console,
@@ -117,10 +120,10 @@ function jsonResponse(status, data) {
   };
 }
 
-test('a successful login survives a page reload in the same tab', async() => {
+test('a successful login survives a page reload in the same tab', async () => {
   const storage = createStorage();
   const token = 'test.jwt.token';
-  const firstPage = createClient(storage, async(url, options = {}) => {
+  const firstPage = createClient(storage, async (url, options = {}) => {
     if (url.endsWith('/login')) {
       return jsonResponse(200, {
         token,
@@ -137,10 +140,10 @@ test('a successful login survives a page reload in the same tab', async() => {
   firstPage.elements.get('loginPassword').value = 'password123';
   await firstPage.context.testApi.login();
 
-  assert.deepEqual(
-    JSON.parse(storage.getItem('movies101-session')),
-    { token, username: 'Nimish' }
-  );
+  assert.deepEqual(JSON.parse(storage.getItem('movies101-session')), {
+    token,
+    username: 'Nimish'
+  });
 
   await firstPage.context.testApi.saveRatingUpdate();
   assert.equal(
@@ -150,7 +153,7 @@ test('a successful login survives a page reload in the same tab', async() => {
   assert.equal(firstPage.elements.get('saveUpdateButton').hidden, true);
 
   let protectedRequestWasMade = false;
-  const refreshedPage = createClient(storage, async(url, options = {}) => {
+  const refreshedPage = createClient(storage, async (url, options = {}) => {
     assert.equal(url, '/api/v1/films/mine');
     assert.equal(options.headers.Authorization, 'Bearer ' + token);
     protectedRequestWasMade = true;
@@ -168,7 +171,7 @@ test('a successful login survives a page reload in the same tab', async() => {
   );
 });
 
-test('an expired saved token is cleared during page startup', async() => {
+test('an expired saved token is cleared during page startup', async () => {
   const storedValues = new Map([
     [
       'movies101-session',
@@ -176,8 +179,10 @@ test('an expired saved token is cleared during page startup', async() => {
     ]
   ]);
   const storage = createStorage(storedValues);
-  const page = createClient(storage, async() => {
-    return jsonResponse(401, { error: 'The login token is invalid or expired.' });
+  const page = createClient(storage, async () => {
+    return jsonResponse(401, {
+      error: 'The login token is invalid or expired.'
+    });
   });
 
   await page.context.restorePromise;
@@ -191,43 +196,101 @@ test('an expired saved token is cleared during page startup', async() => {
   );
 });
 
-
-test('selected catalog movie sends its TMDB ID instead of a typed title', async() => {
+test('selected catalog movie sends its TMDB ID instead of a typed title', async () => {
   const requests = [];
-  const page = createClient(createStorage(), async(url, options = {}) => {
-    requests.push({url, options});
-    if (url.endsWith('/login')) return jsonResponse(200, {token: 'token', user: {username: 'Alice'}});
+  const page = createClient(createStorage(), async (url, options = {}) => {
+    requests.push({ url, options });
+    if (url.endsWith('/login'))
+      return jsonResponse(200, { token: 'token', user: { username: 'Alice' } });
     if (url.endsWith('/films/mine')) return jsonResponse(200, []);
-    if (url.endsWith('/films') && options.method === 'POST') return jsonResponse(201, {_id: 'saved', name: 'The Batman', rating: 8});
+    if (url.endsWith('/films') && options.method === 'POST')
+      return jsonResponse(201, { _id: 'saved', name: 'The Batman', rating: 8 });
     return jsonResponse(200, []);
   });
   page.elements.get('login').value = 'Alice';
   page.elements.get('loginPassword').value = 'password123';
   await page.context.testApi.login();
-  page.context.testApi.selectCatalogMovie({id: 414906, title: 'The Batman', releaseDate: '2022-03-01'});
+  page.context.testApi.selectCatalogMovie({
+    id: 414906,
+    title: 'The Batman',
+    releaseDate: '2022-03-01'
+  });
   page.elements.get('filmRating').value = '8';
   await page.context.testApi.createFilm();
-  const add = requests.find(request => request.options.method === 'POST' && request.url.endsWith('/films'));
-  assert.deepEqual(JSON.parse(add.options.body), {tmdbId: 414906, rating: 8});
+  const add = requests.find(
+    (request) =>
+      request.options.method === 'POST' && request.url.endsWith('/films')
+  );
+  assert.deepEqual(JSON.parse(add.options.body), { tmdbId: 414906, rating: 8 });
   assert.equal(page.elements.get('filmTitle').value, '');
 });
 
-test('watchlist saves a verified movie without a made-up rating', async() => {
+test('watchlist saves a verified movie without a made-up rating', async () => {
   const requests = [];
-  const page = createClient(createStorage(), async(url, options = {}) => {
-    requests.push({url, options});
-    if (url.endsWith('/login')) return jsonResponse(200, {token: 'token', user: {username: 'Alice'}});
+  const page = createClient(createStorage(), async (url, options = {}) => {
+    requests.push({ url, options });
+    if (url.endsWith('/login'))
+      return jsonResponse(200, { token: 'token', user: { username: 'Alice' } });
     if (url.endsWith('/films/mine')) return jsonResponse(200, []);
     if (url.endsWith('/films') && options.method === 'POST') {
-      return jsonResponse(201, {_id: 'saved', name: 'Arrival', watched: false});
+      return jsonResponse(201, {
+        _id: 'saved',
+        name: 'Arrival',
+        watched: false
+      });
     }
     return jsonResponse(200, []);
   });
   page.elements.get('login').value = 'Alice';
   page.elements.get('loginPassword').value = 'password123';
   await page.context.testApi.login();
-  page.context.testApi.selectCatalogMovie({id: 329865, title: 'Arrival', releaseDate: '2016-11-11'});
+  page.context.testApi.selectCatalogMovie({
+    id: 329865,
+    title: 'Arrival',
+    releaseDate: '2016-11-11'
+  });
   await page.context.testApi.saveSelectedToWatchlist();
-  const add = requests.find(request => request.options.method === 'POST' && request.url.endsWith('/films'));
-  assert.deepEqual(JSON.parse(add.options.body), {tmdbId: 329865});
+  const add = requests.find(
+    (request) =>
+      request.options.method === 'POST' && request.url.endsWith('/films')
+  );
+  assert.deepEqual(JSON.parse(add.options.body), { tmdbId: 329865 });
+});
+
+test('Reel Talk sends authenticated chat history and renders the reply', async () => {
+  const requests = [];
+  const page = createClient(createStorage(), async (url, options = {}) => {
+    requests.push({ url, options });
+    if (url.endsWith('/login')) {
+      return jsonResponse(200, {
+        token: 'chat-token',
+        user: { username: 'Alice' }
+      });
+    }
+    if (url.endsWith('/films/mine')) return jsonResponse(200, []);
+    if (url.endsWith('/assistant')) {
+      return jsonResponse(200, {
+        reply: 'Try Moon. Lunar isolation, zero capes.',
+        recommendations: []
+      });
+    }
+    return jsonResponse(200, []);
+  });
+  page.elements.get('login').value = 'Alice';
+  page.elements.get('loginPassword').value = 'password123';
+  await page.context.testApi.login();
+  page.elements.get('assistantInput').value = 'Smart space movie?';
+
+  await page.context.testApi.sendAssistantMessage();
+
+  const chat = requests.find((request) => request.url.endsWith('/assistant'));
+  assert.equal(chat.options.headers.Authorization, 'Bearer chat-token');
+  assert.deepEqual(JSON.parse(chat.options.body), {
+    messages: [{ role: 'user', content: 'Smart space movie?' }]
+  });
+  const renderedText = page.elements
+    .get('assistantMessages')
+    .children.flatMap((child) => child.children)
+    .map((child) => child.textContent);
+  assert.ok(renderedText.includes('Try Moon. Lunar isolation, zero capes.'));
 });

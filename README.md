@@ -8,6 +8,7 @@ Movies101 is a movie discovery and personal shelf app with a responsive web clie
 - Guest community ratings
 - JWT signup, login, and session restoration
 - Watchlist, watched status, ratings, favorites, filters, and removal
+- Reel Talk movie chat with catalog-verified recommendations
 - Web and Flutter clients backed by the same API
 
 ## Run locally

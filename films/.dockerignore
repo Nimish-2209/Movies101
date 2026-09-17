@@ -1,7 +1,9 @@
 node_modules/
 npm-debug.log*
 coverage/
+dist/
 test/
+integration/
 
 .env
 .env.*
