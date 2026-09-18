@@ -35,3 +35,13 @@ cd films && npm test
 cd ../web && npm test
 cd ../mobile && flutter analyze --no-pub && flutter test --no-pub
 ```
+
+## Cloud deployment
+
+The production layout uses Firebase Hosting for the website, Cloud Run for the Docker API, MongoDB Atlas for persistent data, and Ollama Cloud for Reel Talk.
+
+- [`firebase.json`](./firebase.json) serves `web/public` and forwards `/api/**` to the `movies101-api` Cloud Run service in `us-east1`.
+- [`cloudbuild.yaml`](./cloudbuild.yaml) builds the API image, stores it in Artifact Registry, and deploys it to Cloud Run.
+- Cloud Run stores `MONGO_DB_URI`, `JWT_SECRET`, `TMDB_READ_ACCESS_TOKEN`, and `OLLAMA_API_KEY` as secrets. Public configuration uses `OLLAMA_BASE_URL=https://ollama.com` and `OLLAMA_MODEL=gpt-oss:20b`.
+
+Before the first deployment, create a MongoDB Atlas M0 cluster, an Ollama API key, a GCP project with billing enabled, and an Artifact Registry Docker repository named `movies101`. Connect the GitHub repository to Cloud Build for backend deployments and Firebase Hosting for frontend deployments.

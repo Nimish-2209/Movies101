@@ -10,6 +10,7 @@ build/
 dist/
 coverage/
 *.log
+web/public/bootstrap/
 
 # Editor and operating-system files
 .DS_Store

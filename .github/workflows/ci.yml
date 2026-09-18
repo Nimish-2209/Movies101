@@ -63,6 +63,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Build static site
+        run: npm run build:static
       - name: Run tests
         run: npm test
 
